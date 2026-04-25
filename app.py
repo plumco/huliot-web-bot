@@ -14,7 +14,7 @@ st.write("Ask me anything about Huliot pipes, drainage systems, and acoustic sol
 
 # --- 3. AUTO-LOAD THE KNOWLEDGE BASE ---
 # IMPORTANT: Change this to the exact name of the PDF you put on GitHub!
-PDF_FILENAME = "HuliotCatalog.pdf" 
+PDF_FILENAME = "huliot.pdf" 
 
 # This @st.cache_data tag is a superpower! It tells Streamlit to read the 
 # PDF once when the app wakes up and memorize it, making your app blazing fast.
