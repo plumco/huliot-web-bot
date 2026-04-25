@@ -1,9 +1,9 @@
 import streamlit as st
 import google.generativeai as genai
 import PyPDF2
+import os
 
 # --- 1. SETUP GEMINI AI ---
-# Paste your Huliot Streamlit Key inside the quotes below!
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -12,15 +12,35 @@ st.set_page_config(page_title="Huliot AI Assistant", page_icon="💧")
 st.title("💧 Huliot Technical Assistant")
 st.write("Ask me anything about Huliot pipes, drainage systems, and acoustic solutions!")
 
+# --- 3. AUTO-LOAD THE KNOWLEDGE BASE ---
+# IMPORTANT: Change this to the exact name of the PDF you put on GitHub!
+PDF_FILENAME = "huliot.pdf" 
+
+# This @st.cache_data tag is a superpower! It tells Streamlit to read the 
+# PDF once when the app wakes up and memorize it, making your app blazing fast.
+@st.cache_data
+def load_knowledge_base():
+    text = ""
+    if os.path.exists(PDF_FILENAME):
+        with open(PDF_FILENAME, "rb") as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+    return text
+
+catalog_text = load_knowledge_base()
+
 with st.sidebar:
-    st.header("🧠 Train your AI")
-    st.write("Upload a Huliot PDF catalog to lock the AI into STRICT mode.")
-    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+    st.header("🧠 AI Brain Status")
+    if catalog_text != "":
+        st.success(f"Knowledge Base Loaded! ({PDF_FILENAME})")
+        st.write("STRICT MODE ENABLED 🔒")
+    else:
+        st.error(f"⚠️ Could not find '{PDF_FILENAME}'. Please check the file name in your code and on GitHub.")
     
     st.divider()
     st.header("⚙️ AI Settings")
     st.write("Select an AI Brain that has free credits left:")
-    
     try:
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         selected_model = st.selectbox("Choose AI Brain", available_models)
@@ -28,25 +48,8 @@ with st.sidebar:
         st.error("Could not fetch models. Check API Key.")
         selected_model = "models/gemini-1.5-flash"
 
-# --- READ THE PDF IF UPLOADED ---
-catalog_text = ""
-if uploaded_file is not None:
-    pdf_reader = PyPDF2.PdfReader(uploaded_file)
-    for page in pdf_reader.pages:
-        catalog_text += page.extract_text()
-    st.sidebar.success("Catalog memorized! STRICT MODE ENABLED 🔒")
-
-# --- 3. DUAL MODE SMART PROMPT ---
-# This changes the AI's personality based on whether a file is uploaded!
-if catalog_text == "":
-    # MODE 1: NO FILE UPLOADED (Uses general internet knowledge)
-    HULIOT_SYSTEM_PROMPT = """
-    You are the expert Technical Manager for Huliot India.
-    Please answer the user's questions about Huliot products, plumbing, and drainage systems using your general knowledge. 
-    Keep your answers professional, helpful, and concise.
-    """
-else:
-    # MODE 2: FILE UPLOADED (Strictly locked to the PDF only)
+# --- 4. STRICT PROMPT ---
+if catalog_text != "":
     HULIOT_SYSTEM_PROMPT = f"""
     You are the expert Technical Manager for Huliot India.
     CRITICAL INSTRUCTION: You must answer questions using ONLY the text provided in the OFFICIAL CATALOG DATA below. 
@@ -56,14 +59,17 @@ else:
     OFFICIAL CATALOG DATA:
     {catalog_text}
     """
+else:
+    # Fallback if the file breaks
+    HULIOT_SYSTEM_PROMPT = "You are a helpful AI. Please answer questions based on your general knowledge."
 
-# Create the AI model
 model = genai.GenerativeModel(
     model_name=selected_model,
-    system_instruction=HULIOT_SYSTEM_PROMPT
+    system_instruction=HULIOT_SYSTEM_PROMPT,
+    generation_config={"temperature": 0.0}
 )
 
-# --- 4. CHAT MEMORY ---
+# --- 5. CHAT MEMORY ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -71,7 +77,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 5. HANDLE NEW USER MESSAGES ---
+# --- 6. HANDLE NEW USER MESSAGES ---
 user_question = st.chat_input("Type your question here...")
 
 if user_question:
