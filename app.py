@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import PyPDF2
 import os
+import glob
 
 # --- 1. SETUP GEMINI AI ---
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
@@ -12,31 +13,39 @@ st.set_page_config(page_title="Huliot AI Assistant", page_icon="💧")
 st.title("💧 Huliot Technical Assistant")
 st.write("Ask me anything about Huliot pipes, drainage systems, and acoustic solutions!")
 
-# --- 3. AUTO-LOAD THE KNOWLEDGE BASE ---
-# IMPORTANT: Change this to the exact name of the PDF you put on GitHub!
-PDF_FILENAME = "huliot.pdf" 
-
-# This @st.cache_data tag is a superpower! It tells Streamlit to read the 
-# PDF once when the app wakes up and memorize it, making your app blazing fast.
+# --- 3. AUTO-LOAD THE KNOWLEDGE BASE (MULTI-FILE) ---
+# This @st.cache_data tag tells Streamlit to read the PDFs once when the app wakes up
 @st.cache_data
 def load_knowledge_base():
     text = ""
-    if os.path.exists(PDF_FILENAME):
-        with open(PDF_FILENAME, "rb") as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            for page in pdf_reader.pages:
-                text += page.extract_text()
-    return text
+    # glob.glob("*.pdf") finds EVERY file ending in .pdf in your folder!
+    pdf_files = glob.glob("*.pdf") 
+    
+    if len(pdf_files) == 0:
+        return "", 0 # No files found
+        
+    for file_name in pdf_files:
+        try:
+            with open(file_name, "rb") as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                for page in pdf_reader.pages:
+                    extracted = page.extract_text()
+                    if extracted:
+                        text += extracted + "\n"
+        except Exception:
+            pass # If one file is corrupted, skip it and keep reading the others!
+            
+    return text, len(pdf_files)
 
-catalog_text = load_knowledge_base()
+catalog_text, file_count = load_knowledge_base()
 
 with st.sidebar:
     st.header("🧠 AI Brain Status")
-    if catalog_text != "":
-        st.success(f"Knowledge Base Loaded! ({PDF_FILENAME})")
+    if file_count > 0:
+        st.success(f"Knowledge Base Loaded! ({file_count} files memorized)")
         st.write("STRICT MODE ENABLED 🔒")
     else:
-        st.error(f"⚠️ Could not find '{PDF_FILENAME}'. Please check the file name in your code and on GitHub.")
+        st.error("⚠️ Could not find any PDF files. Please upload them to GitHub.")
     
     st.divider()
     st.header("⚙️ AI Settings")
@@ -60,7 +69,7 @@ if catalog_text != "":
     {catalog_text}
     """
 else:
-    # Fallback if the file breaks
+    # Fallback if the files break or are missing
     HULIOT_SYSTEM_PROMPT = "You are a helpful AI. Please answer questions based on your general knowledge."
 
 model = genai.GenerativeModel(
