@@ -4,7 +4,8 @@ import glob
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter 
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+# THE FIX: We import the free HuggingFace embedding tool!
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 # --- 1. SETUP ---
@@ -17,7 +18,7 @@ API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=API_KEY)
 os.environ["GOOGLE_API_KEY"] = API_KEY
 
-# --- 2. THE VECTOR DATABASE ---
+# --- 2. THE VECTOR DATABASE (HUGGINGFACE UPGRADE) ---
 @st.cache_resource
 def build_vector_database():
     pdf_files = glob.glob("*.pdf") 
@@ -37,16 +38,12 @@ def build_vector_database():
     chunks = text_splitter.split_documents(documents)
     
     try:
-        # THE FIX: Going back to the reliable older model your API key supports!
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001", 
-            google_api_key=API_KEY,
-            task_type="retrieval_document"
-        )
+        # THE FIX: We use a local, free embedding model. Google cannot block this!
+        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         vector_db = FAISS.from_documents(chunks, embeddings)
         return vector_db, len(pdf_files)
     except Exception as e:
-        st.error(f"⚠️ Google API blocked the database creation. Error: {e}")
+        st.error(f"⚠️ Database creation failed. Error: {e}")
         return None, 0
 
 with st.spinner("Building Vector Database... (This takes a few seconds)"):
@@ -71,13 +68,12 @@ with st.sidebar:
             
     st.divider()
     
-    # THE FIX: Bringing back your dropdown menu so you can pick a working brain!
     st.header("⚙️ AI Settings")
     try:
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         selected_model = st.selectbox("Choose AI Brain", available_models)
     except Exception:
-        selected_model = "models/gemini-1.5-flash" # Fallback
+        selected_model = "models/gemini-1.5-flash"
 
 # --- 4. ENGINE & LEARNING ---
 def get_answer(question, chosen_model):
@@ -94,7 +90,6 @@ def get_answer(question, chosen_model):
     Answer professionally using ONLY the Search Results and your Diary."""
     
     try:
-        # Uses the brain you pick in the dropdown!
         model = genai.GenerativeModel(chosen_model)
         response = model.generate_content(prompt)
         return response.text
