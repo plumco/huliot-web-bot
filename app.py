@@ -45,6 +45,18 @@ with st.sidebar:
         st.info("📓 Diary has saved memories!")
     else:
         st.warning("📓 Diary is empty right now.")
+        
+    st.divider()
+    st.header("⚙️ AI Settings")
+    st.write("Select an AI Brain that has free credits left:")
+    
+    # THE FIX: Bringing back your dropdown menu!
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        selected_model = st.selectbox("Choose AI Brain", available_models)
+    except Exception as e:
+        st.error("Could not fetch models. Check API Key.")
+        selected_model = "models/gemini-1.5-flash"
 
 # --- 5. GIVE THE ROBOT ITS RULES ---
 HULIOT_SYSTEM_PROMPT = f"""
@@ -59,8 +71,9 @@ YOUR DIARY (Things you learned day-by-day):
 Answer questions using ONLY the PDFs and your Diary. Do not guess.
 """
 
+# Use whatever brain you select in the dropdown
 model = genai.GenerativeModel(
-    model_name="models/gemini-1.5-flash",
+    model_name=selected_model,
     system_instruction=HULIOT_SYSTEM_PROMPT,
     generation_config={"temperature": 0.0}
 )
