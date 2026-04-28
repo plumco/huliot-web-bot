@@ -3,8 +3,6 @@ import os
 import glob
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
-
-# THE FIX: Using the brand new langchain_text_splitters library!
 from langchain_text_splitters import RecursiveCharacterTextSplitter 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
@@ -41,7 +39,11 @@ def build_vector_database():
     chunks = text_splitter.split_documents(documents)
     
     # 3. Turn text into Math (Embeddings) and build the Database!
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    # THE FIX: We are explicitly passing the API Key and using the new model here!
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004", 
+        google_api_key=API_KEY
+    )
     vector_db = FAISS.from_documents(chunks, embeddings)
     
     return vector_db, len(pdf_files)
