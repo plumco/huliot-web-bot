@@ -8,22 +8,16 @@ import glob
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=GEMINI_API_KEY)
 
-# --- 2. BUILD THE STREAMLIT WEBPAGE ---
+# --- 2. BUILD THE WEBPAGE ---
 st.set_page_config(page_title="Huliot AI Assistant", page_icon="💧")
 st.title("💧 Huliot Technical Assistant")
-st.write("Ask me anything about Huliot pipes, drainage systems, and acoustic solutions!")
+st.write("Ask me anything! Or type **LEARN:** to teach me a new rule!")
 
-# --- 3. AUTO-LOAD THE KNOWLEDGE BASE (MULTI-FILE) ---
-# This @st.cache_data tag tells Streamlit to read the PDFs once when the app wakes up
+# --- 3. READ ALL PDF FILES ---
 @st.cache_data
 def load_knowledge_base():
     text = ""
-    # glob.glob("*.pdf") finds EVERY file ending in .pdf in your folder!
     pdf_files = glob.glob("*.pdf") 
-    
-    if len(pdf_files) == 0:
-        return "", 0 # No files found
-        
     for file_name in pdf_files:
         try:
             with open(file_name, "rb") as file:
@@ -33,52 +27,45 @@ def load_knowledge_base():
                     if extracted:
                         text += extracted + "\n"
         except Exception:
-            pass # If one file is corrupted, skip it and keep reading the others!
-            
+            pass
     return text, len(pdf_files)
 
 catalog_text, file_count = load_knowledge_base()
 
+# --- 4. READ THE DIARY ---
+diary_memory = ""
+if os.path.exists("robot_diary.txt"):
+    with open("robot_diary.txt", "r", encoding="utf-8") as file:
+        diary_memory = file.read()
+
 with st.sidebar:
     st.header("🧠 AI Brain Status")
-    if file_count > 0:
-        st.success(f"Knowledge Base Loaded! ({file_count} files memorized)")
-        st.write("STRICT MODE ENABLED 🔒")
+    st.success(f"{file_count} PDFs Memorized!")
+    if diary_memory != "":
+        st.info("📓 Diary has saved memories!")
     else:
-        st.error("⚠️ Could not find any PDF files. Please upload them to GitHub.")
+        st.warning("📓 Diary is empty right now.")
+
+# --- 5. GIVE THE ROBOT ITS RULES ---
+HULIOT_SYSTEM_PROMPT = f"""
+You are the expert Technical Manager for Huliot India.
     
-    st.divider()
-    st.header("⚙️ AI Settings")
-    st.write("Select an AI Brain that has free credits left:")
-    try:
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        selected_model = st.selectbox("Choose AI Brain", available_models)
-    except Exception as e:
-        st.error("Could not fetch models. Check API Key.")
-        selected_model = "models/gemini-1.5-flash"
+OFFICIAL RULES (From PDFs):
+{catalog_text}
 
-# --- 4. STRICT PROMPT ---
-if catalog_text != "":
-    HULIOT_SYSTEM_PROMPT = f"""
-    You are the expert Technical Manager for Huliot India.
-    CRITICAL INSTRUCTION: You must answer questions using ONLY the text provided in the OFFICIAL CATALOG DATA below. 
-    DO NOT use your general AI internet knowledge. DO NOT guess. 
-    If the exact answer cannot be found in the text below, you must reply exactly with: "I'm sorry, but that information is not in the uploaded catalog."
-
-    OFFICIAL CATALOG DATA:
-    {catalog_text}
-    """
-else:
-    # Fallback if the files break or are missing
-    HULIOT_SYSTEM_PROMPT = "You are a helpful AI. Please answer questions based on your general knowledge."
+YOUR DIARY (Things you learned day-by-day):
+{diary_memory}
+    
+Answer questions using ONLY the PDFs and your Diary. Do not guess.
+"""
 
 model = genai.GenerativeModel(
-    model_name=selected_model,
+    model_name="models/gemini-1.5-flash",
     system_instruction=HULIOT_SYSTEM_PROMPT,
     generation_config={"temperature": 0.0}
 )
 
-# --- 5. CHAT MEMORY ---
+# --- 6. CHAT MEMORY ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -86,7 +73,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 6. HANDLE NEW USER MESSAGES ---
+# --- 7. TALK TO THE ROBOT ---
 user_question = st.chat_input("Type your question here...")
 
 if user_question:
@@ -94,11 +81,20 @@ if user_question:
         st.markdown(user_question)
     st.session_state.messages.append({"role": "user", "content": user_question})
 
-    try:
-        response = model.generate_content(user_question)
-        ai_answer = response.text
-    except Exception as e:
-        ai_answer = f"⚠️ Oops! This model threw an error: {e}"
+    # THE MAGIC TRICK: Teaching the robot!
+    if user_question.startswith("LEARN:"):
+        new_fact = user_question.replace("LEARN:", "").strip()
+        with open("robot_diary.txt", "a", encoding="utf-8") as file:
+            file.write("- " + new_fact + "\n")
+        ai_answer = f"✍️ I just wrote this in my diary: '{new_fact}'. I will remember it tomorrow!"
+    
+    # NORMAL CHAT
+    else:
+        try:
+            response = model.generate_content(user_question)
+            ai_answer = response.text
+        except Exception as e:
+            ai_answer = f"⚠️ Oops! Error: {e}"
 
     with st.chat_message("assistant"):
         st.markdown(ai_answer)
