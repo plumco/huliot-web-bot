@@ -3,7 +3,9 @@ import os
 import glob
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# THE FIX: Using the brand new langchain_text_splitters library!
+from langchain_text_splitters import RecursiveCharacterTextSplitter 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
 
@@ -18,7 +20,6 @@ genai.configure(api_key=API_KEY)
 os.environ["GOOGLE_API_KEY"] = API_KEY
 
 # --- 2. THE VECTOR DATABASE (SUPER MEMORY) ---
-# We use @st.cache_resource so it only builds the database ONCE to save speed.
 @st.cache_resource
 def build_vector_database():
     pdf_files = glob.glob("*.pdf") 
@@ -31,7 +32,8 @@ def build_vector_database():
         try:
             loader = PyPDFLoader(file)
             documents.extend(loader.load())
-        except Exception:
+        except Exception as e:
+            print(f"Skipping {file}: {e}")
             pass
 
     # 2. Chop them into smart "Puzzle Pieces" (Chunks)
@@ -47,7 +49,7 @@ def build_vector_database():
 with st.spinner("Building Vector Database... (This takes a few seconds)"):
     vector_db, file_count = build_vector_database()
 
-# --- 3. THE DIARY ---
+# --- 3. THE DIARY (LOCAL MEMORY) ---
 diary_memory = ""
 if os.path.exists("robot_diary.txt"):
     with open("robot_diary.txt", "r", encoding="utf-8") as file:
@@ -66,8 +68,6 @@ with st.sidebar:
             st.write(diary_memory)
             
     st.divider()
-    # The Chat Brain
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.0)
 
 # --- 5. THE SEARCH & ANSWER ENGINE ---
 def get_answer(question):
@@ -94,7 +94,6 @@ def get_answer(question):
     If the answer is not in those sources, say: "I'm sorry, I don't have that in my database yet."
     """
     
-    # 3. Ask Gemini to read the combined prompt
     try:
         model = genai.GenerativeModel("models/gemini-1.5-flash")
         response = model.generate_content(prompt)
@@ -104,10 +103,10 @@ def get_answer(question):
 
 # --- 6. BACKGROUND AUTOLOOP (LEARNING) ---
 def auto_learn(user_txt, ai_txt):
-    prompt = f"""Did the user teach a new rule or correct a mistake here? 
+    prompt = f"""Did the user teach a new rule, correct a mistake, or give a specific site instruction here? 
     User: {user_txt}
     AI: {ai_txt}
-    If YES, reply with ONE sentence summarizing the new rule. If NO, reply 'NONE'."""
+    If YES, reply with ONE clear sentence summarizing the new rule. If NO, reply exactly with the word NONE."""
     try:
         model = genai.GenerativeModel("models/gemini-1.5-flash")
         thought = model.generate_content(prompt).text.strip()
@@ -115,7 +114,7 @@ def auto_learn(user_txt, ai_txt):
             with open("robot_diary.txt", "a", encoding="utf-8") as f:
                 f.write("- " + thought + "\n")
             return thought
-    except:
+    except Exception:
         pass
     return None
 
@@ -136,12 +135,13 @@ if user_question:
 
     # Generate answer using the Vector DB search!
     with st.chat_message("assistant"):
-        ai_answer = get_answer(user_question)
+        with st.spinner("Searching documents..."):
+            ai_answer = get_answer(user_question)
         st.markdown(ai_answer)
     st.session_state.messages.append({"role": "assistant", "content": ai_answer})
 
     # Run auto-learning in background
-    with st.spinner("🤖 Analyzing..."):
+    with st.spinner("🤖 Analyzing conversation for new rules..."):
         new_rule = auto_learn(user_question, ai_answer)
         if new_rule:
-            st.success(f"**🧠 Self-Learning:** Saved to memory: *{new_rule}*")
+            st.success(f"**🧠 Self-Learning:** I saved this to my memory: *{new_rule}*")
