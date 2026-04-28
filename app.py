@@ -12,12 +12,12 @@ st.set_page_config(page_title="Huliot Super-Agent", page_icon="🤖")
 st.title("🤖 Huliot Vector Agent")
 st.write("Powered by a LangChain Vector Database (Like NotebookLM!)")
 
-# Get API Key and set it for both standard Gemini and LangChain
+# Get API Key
 API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=API_KEY)
 os.environ["GOOGLE_API_KEY"] = API_KEY
 
-# --- 2. THE VECTOR DATABASE (SUPER MEMORY) ---
+# --- 2. THE VECTOR DATABASE ---
 @st.cache_resource
 def build_vector_database():
     pdf_files = glob.glob("*.pdf") 
@@ -25,45 +25,39 @@ def build_vector_database():
         return None, 0
 
     documents = []
-    # 1. Load all PDFs
     for file in pdf_files:
         try:
             loader = PyPDFLoader(file)
             documents.extend(loader.load())
-        except Exception as e:
+        except Exception:
             pass
 
-    # NEW FIX: Filter out completely blank pages that crash Google's API
     documents = [doc for doc in documents if doc.page_content.strip() != ""]
-
-    # 2. Chop them into smaller, safer puzzle pieces
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
     chunks = text_splitter.split_documents(documents)
     
-    # 3. Turn text into Math (Embeddings) safely!
     try:
+        # THE FIX: Going back to the reliable older model your API key supports!
         embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004", 
+            model="models/embedding-001", 
             google_api_key=API_KEY,
             task_type="retrieval_document"
         )
         vector_db = FAISS.from_documents(chunks, embeddings)
         return vector_db, len(pdf_files)
     except Exception as e:
-        # If Google blocks us, show the warning instead of crashing!
         st.error(f"⚠️ Google API blocked the database creation. Error: {e}")
         return None, 0
 
 with st.spinner("Building Vector Database... (This takes a few seconds)"):
     vector_db, file_count = build_vector_database()
 
-# --- 3. THE DIARY (LOCAL MEMORY) ---
+# --- 3. DIARY & SIDEBAR SETTINGS ---
 diary_memory = ""
 if os.path.exists("robot_diary.txt"):
     with open("robot_diary.txt", "r", encoding="utf-8") as file:
         diary_memory = file.read()
 
-# --- 4. SIDEBAR STATUS ---
 with st.sidebar:
     st.header("🧠 AI Brain Status")
     if vector_db:
@@ -76,57 +70,51 @@ with st.sidebar:
             st.write(diary_memory)
             
     st.divider()
+    
+    # THE FIX: Bringing back your dropdown menu so you can pick a working brain!
+    st.header("⚙️ AI Settings")
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        selected_model = st.selectbox("Choose AI Brain", available_models)
+    except Exception:
+        selected_model = "models/gemini-1.5-flash" # Fallback
 
-# --- 5. THE SEARCH & ANSWER ENGINE ---
-def get_answer(question):
-    # 1. Search the Database for the exact paragraphs needed
+# --- 4. ENGINE & LEARNING ---
+def get_answer(question, chosen_model):
     if vector_db:
-        search_results = vector_db.similarity_search(question, k=4) # Grab top 4 chunks
+        search_results = vector_db.similarity_search(question, k=4)
         context_text = "\n\n".join([doc.page_content for doc in search_results])
     else:
         context_text = "No PDF context available."
 
-    # 2. Combine the Search Results, the Diary, and the Question
-    prompt = f"""
-    You are the expert Technical Manager for Huliot India.
-    
-    SEARCH RESULTS (From Database):
-    {context_text}
-    
-    YOUR DIARY (Site Rules):
-    {diary_memory}
-    
+    prompt = f"""You are the expert Technical Manager for Huliot India.
+    SEARCH RESULTS: {context_text}
+    YOUR DIARY: {diary_memory}
     QUESTION: {question}
-    
-    Answer the question professionally using ONLY the Search Results and your Diary.
-    If the answer is not in those sources, say: "I'm sorry, I don't have that in my database yet."
-    """
+    Answer professionally using ONLY the Search Results and your Diary."""
     
     try:
-        model = genai.GenerativeModel("models/gemini-1.5-flash")
+        # Uses the brain you pick in the dropdown!
+        model = genai.GenerativeModel(chosen_model)
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
         return f"Error: {e}"
 
-# --- 6. BACKGROUND AUTOLOOP (LEARNING) ---
-def auto_learn(user_txt, ai_txt):
-    prompt = f"""Did the user teach a new rule, correct a mistake, or give a specific site instruction here? 
-    User: {user_txt}
-    AI: {ai_txt}
-    If YES, reply with ONE clear sentence summarizing the new rule. If NO, reply exactly with the word NONE."""
+def auto_learn(user_txt, ai_txt, chosen_model):
+    prompt = f"Did the user teach a new rule here?\nUser: {user_txt}\nAI: {ai_txt}\nIf YES, reply with ONE sentence. If NO, reply 'NONE'."
     try:
-        model = genai.GenerativeModel("models/gemini-1.5-flash")
+        model = genai.GenerativeModel(chosen_model)
         thought = model.generate_content(prompt).text.strip()
         if thought != "NONE" and thought != "" and "NONE" not in thought:
             with open("robot_diary.txt", "a", encoding="utf-8") as f:
                 f.write("- " + thought + "\n")
             return thought
-    except Exception:
+    except:
         pass
     return None
 
-# --- 7. CHAT INTERFACE ---
+# --- 5. CHAT UI ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -141,15 +129,13 @@ if user_question:
         st.markdown(user_question)
     st.session_state.messages.append({"role": "user", "content": user_question})
 
-    # Generate answer using the Vector DB search!
     with st.chat_message("assistant"):
         with st.spinner("Searching documents..."):
-            ai_answer = get_answer(user_question)
+            ai_answer = get_answer(user_question, selected_model)
         st.markdown(ai_answer)
     st.session_state.messages.append({"role": "assistant", "content": ai_answer})
 
-    # Run auto-learning in background
     with st.spinner("🤖 Analyzing conversation for new rules..."):
-        new_rule = auto_learn(user_question, ai_answer)
+        new_rule = auto_learn(user_question, ai_answer, selected_model)
         if new_rule:
             st.success(f"**🧠 Self-Learning:** I saved this to my memory: *{new_rule}*")
