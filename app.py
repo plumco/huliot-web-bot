@@ -9,9 +9,9 @@ GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 genai.configure(api_key=GEMINI_API_KEY)
 
 # --- 2. BUILD THE WEBPAGE ---
-st.set_page_config(page_title="Huliot AI Assistant", page_icon="💧")
-st.title("💧 Huliot Technical Assistant")
-st.write("Ask me anything! Or type **LEARN:** to teach me a new rule!")
+st.set_page_config(page_title="Huliot Auto-Learning Agent", page_icon="🤖")
+st.title("🤖 Huliot Autonomous Agent")
+st.write("I learn automatically! Just talk to me or correct me, and I will update my own diary.")
 
 # --- 3. READ ALL PDF FILES ---
 @st.cache_data
@@ -43,22 +43,45 @@ with st.sidebar:
     st.success(f"{file_count} PDFs Memorized!")
     if diary_memory != "":
         st.info("📓 Diary has saved memories!")
+        with st.expander("Peek inside the Diary"):
+            st.write(diary_memory)
     else:
         st.warning("📓 Diary is empty right now.")
         
     st.divider()
     st.header("⚙️ AI Settings")
-    st.write("Select an AI Brain that has free credits left:")
-    
-    # THE FIX: Bringing back your dropdown menu!
     try:
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         selected_model = st.selectbox("Choose AI Brain", available_models)
     except Exception as e:
-        st.error("Could not fetch models. Check API Key.")
         selected_model = "models/gemini-1.5-flash"
 
-# --- 5. GIVE THE ROBOT ITS RULES ---
+# --- 5. THE AGENT LEARNING FUNCTION (BACKGROUND BRAIN) ---
+def think_and_learn(user_text, ai_text):
+    """This runs secretly in the background to extract new rules!"""
+    reflection_prompt = f"""
+    You are the "Memory Manager" for an AI assistant. Analyze this short conversation:
+    User said: "{user_text}"
+    AI replied: "{ai_text}"
+    
+    Did the user explicitly teach a new rule, correct a mistake, or provide a specific site instruction that the AI should remember forever?
+    - If YES: Extract the core fact into one single, clear sentence.
+    - If NO (it's just a normal question, greeting, or the AI answered correctly): Reply exactly with the word NONE.
+    """
+    try:
+        thinking_model = genai.GenerativeModel("models/gemini-1.5-flash")
+        thought = thinking_model.generate_content(reflection_prompt).text.strip()
+        
+        # If the brain didn't say "NONE", it means it learned something new!
+        if thought != "NONE" and thought != "" and "NONE" not in thought:
+            with open("robot_diary.txt", "a", encoding="utf-8") as file:
+                file.write("- " + thought + "\n")
+            return thought 
+    except Exception:
+        pass
+    return None
+
+# --- 6. GIVE THE ROBOT ITS RULES ---
 HULIOT_SYSTEM_PROMPT = f"""
 You are the expert Technical Manager for Huliot India.
     
@@ -68,17 +91,16 @@ OFFICIAL RULES (From PDFs):
 YOUR DIARY (Things you learned day-by-day):
 {diary_memory}
     
-Answer questions using ONLY the PDFs and your Diary. Do not guess.
+Answer questions using ONLY the PDFs and your Diary. Be helpful and professional.
 """
 
-# Use whatever brain you select in the dropdown
 model = genai.GenerativeModel(
     model_name=selected_model,
     system_instruction=HULIOT_SYSTEM_PROMPT,
     generation_config={"temperature": 0.0}
 )
 
-# --- 6. CHAT MEMORY ---
+# --- 7. CHAT MEMORY ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -86,29 +108,27 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 7. TALK TO THE ROBOT ---
-user_question = st.chat_input("Type your question here...")
+# --- 8. TALK TO THE AGENT ---
+user_question = st.chat_input("Ask a question or correct the bot...")
 
 if user_question:
+    # 1. Print User Message
     with st.chat_message("user"):
         st.markdown(user_question)
     st.session_state.messages.append({"role": "user", "content": user_question})
 
-    # THE MAGIC TRICK: Teaching the robot!
-    if user_question.startswith("LEARN:"):
-        new_fact = user_question.replace("LEARN:", "").strip()
-        with open("robot_diary.txt", "a", encoding="utf-8") as file:
-            file.write("- " + new_fact + "\n")
-        ai_answer = f"✍️ I just wrote this in my diary: '{new_fact}'. I will remember it tomorrow!"
-    
-    # NORMAL CHAT
-    else:
+    # 2. Generate Normal Answer
+    with st.chat_message("assistant"):
         try:
             response = model.generate_content(user_question)
             ai_answer = response.text
         except Exception as e:
             ai_answer = f"⚠️ Oops! Error: {e}"
-
-    with st.chat_message("assistant"):
         st.markdown(ai_answer)
     st.session_state.messages.append({"role": "assistant", "content": ai_answer})
+
+    # 3. BACKGROUND THINKING (The Self-Learning Magic!)
+    with st.spinner("🤖 Agent is analyzing the conversation..."):
+        new_rule = think_and_learn(user_question, ai_answer)
+        if new_rule:
+            st.success(f"**🧠 Self-Learning Triggered!** I realized you taught me something new. I just saved this to my permanent memory: *{new_rule}*")
